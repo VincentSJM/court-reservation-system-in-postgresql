@@ -1,0 +1,154 @@
+Timing is on.
+Border style is 2.
+-- a
+-- List all of today's reservations (members, times, courts and confirmation status). 
+-- This might be what the receptionist prints and posts every morning.
+SELECT member_id, member_name, time_of_day, court_id, court_name, court_location, type_of_action
+FROM member NATURAL JOIN 
+     reservation NATURAL JOIN 
+     court
+WHERE reservation.day = now()::date AND
+      (reservation.type_of_action = 'booked' OR reservation.type_of_action = 'confirmed') 
+ORDER BY court_id, time_of_day;
++-----------+------------------------------------------+-------------+----------+------------------------------------------+------------------------------------------+----------------+
+| member_id |               member_name                | time_of_day | court_id |                court_name                |              court_location              | type_of_action |
++-----------+------------------------------------------+-------------+----------+------------------------------------------+------------------------------------------+----------------+
+|  11331003 | Tim Yu                                   | 20:00:00    |        1 | Central Court                            | River Campus                             | booked         |
++-----------+------------------------------------------+-------------+----------+------------------------------------------+------------------------------------------+----------------+
+(1 row)
+
+Time: 4.472 ms
+-- b
+-- Show all of member m's reservations (minimally 3; show times, courts and confirmation status) for the next 7 days. 
+-- Include p: the current number of penalty points incurred by m (must be > 1 for member m).
+SELECT member_id, 
+       member_name, 
+       day, 
+       time_of_day, 
+       court_id, 
+       court_name, 
+       type_of_action,
+       penalty_point
+FROM member NATURAL JOIN 
+     reservation NATURAL JOIN 
+     court NATURAL JOIN
+     penalty
+WHERE member_id = 11331276 AND
+      day <= now()::date + integer '7';
++-----------+------------------------------------------+------------+-------------+----------+------------------------------------------+----------------+---------------+
+| member_id |               member_name                |    day     | time_of_day | court_id |                court_name                | type_of_action | penalty_point |
++-----------+------------------------------------------+------------+-------------+----------+------------------------------------------+----------------+---------------+
+|  11331276 | Jiaming SU                               | 2016-04-17 | 08:00:00    |        1 | Central Court                            | dropped        |             2 |
+|  11331276 | Jiaming SU                               | 2016-04-18 | 10:00:00    |        1 | Central Court                            | dropped        |             2 |
+|  11331276 | Jiaming SU                               | 2016-04-19 | 10:00:00    |        1 | Central Court                            | booked         |             2 |
+|  11331276 | Jiaming SU                               | 2016-04-20 | 10:00:00    |        1 | Central Court                            | booked         |             2 |
++-----------+------------------------------------------+------------+-------------+----------+------------------------------------------+----------------+---------------+
+(4 rows)
+
+Time: 2.608 ms
+-- c
+-- Add a reservation for member m for some court at some time t for n days from today, where n + p > 7. 
+-- Repeat with a different n such that n + p <= 7.
+INSERT INTO reservation 
+VALUES (11019,11331276, now(),'booked',1,now()::date + integer '6', TIME '10:00');
+Time: 5.298 ms
+INSERT INTO reservation 
+VALUES (11020,11331276, now(),'booked',1,now()::date + integer '5', TIME '11:00');
+INSERT 0 1
+Time: 3.963 ms
+-- d
+-- Confirm member m's next reservation.
+CREATE OR REPLACE VIEW m_s_next_reservation AS
+SELECT reservation_id, day, time_of_day
+FROM reservation
+WHERE member_id = 11331276 AND
+      type_of_action = 'booked'
+ORDER BY day, time_of_day ASC
+LIMIT 1; 
+CREATE VIEW
+Time: 7.083 ms
+UPDATE reservation
+SET type_of_action = 'confirmed', 
+    time_stamp = ((SELECT day FROM m_s_next_reservation) + 
+                 (SELECT time_of_day FROM m_s_next_reservation))
+WHERE reservation_id = (SELECT reservation_id FROM m_s_next_reservation);
+UPDATE 1
+Time: 3.423 ms
+-- e
+-- Cancel one of member m's upcoming reservations.
+UPDATE reservation
+SET type_of_action = 'canceled', 
+    time_stamp = ((SELECT day FROM m_s_next_reservation) + 
+                 (SELECT time_of_day FROM m_s_next_reservation) -
+                 interval '1 minutes')
+WHERE reservation_id = (SELECT reservation_id FROM m_s_next_reservation);
+UPDATE 1
+Time: 2.586 ms
+-- f
+-- Show all of m's reservations again, as before.
+SELECT member_id, 
+       member_name, 
+       day, 
+       time_of_day, 
+       court_id, 
+       court_name, 
+       type_of_action,
+       penalty_point
+FROM member NATURAL JOIN 
+     reservation NATURAL JOIN 
+     court NATURAL JOIN
+     penalty
+WHERE member_id = 11331276 AND
+      day <=  now()::date + integer '7';
++-----------+------------------------------------------+------------+-------------+----------+------------------------------------------+----------------+---------------+
+| member_id |               member_name                |    day     | time_of_day | court_id |                court_name                | type_of_action | penalty_point |
++-----------+------------------------------------------+------------+-------------+----------+------------------------------------------+----------------+---------------+
+|  11331276 | Jiaming SU                               | 2016-04-17 | 08:00:00    |        1 | Central Court                            | dropped        |             2 |
+|  11331276 | Jiaming SU                               | 2016-04-18 | 10:00:00    |        1 | Central Court                            | dropped        |             2 |
+|  11331276 | Jiaming SU                               | 2016-04-20 | 11:00:00    |        1 | Central Court                            | booked         |             2 |
+|  11331276 | Jiaming SU                               | 2016-04-19 | 10:00:00    |        1 | Central Court                            | confirmed      |             2 |
+|  11331276 | Jiaming SU                               | 2016-04-20 | 10:00:00    |        1 | Central Court                            | canceled       |             2 |
++-----------+------------------------------------------+------------+-------------+----------+------------------------------------------+----------------+---------------+
+(5 rows)
+
+Time: 1.404 ms
+DROP VIEW m_s_next_reservation;
+DROP VIEW
+Time: 2.425 ms
+-- g
+-- Add any additional queries and commands you deem appropriate to show off the effectiveness of your constraints.
+-- Trigger initially insertion should be 'booked'
+INSERT INTO reservation 
+VALUES (10009,11331276, now(),'confirmed',1,now()::date + integer '5', TIME '08:00');
+Time: 0.470 ms
+-- Trigger Reservations can only be made on the working hour 8AM to 9PM.
+INSERT INTO reservation 
+VALUES (12012,11331177, now(),'booked',1,now()::date + integer '5', TIME '08:02');
+Time: 2.068 ms
+-- Trigger No 2 reservation should be on the same court same day same time.
+INSERT INTO reservation 
+ VALUES (11012,11331177, now(),'booked',1,now()::date + integer '5', TIME '08:00');
+Time: 0.746 ms
+-- Trigger Reservation exceed the lead time.
+INSERT INTO reservation 
+VALUES (10013,11331177, now(),'booked',1,now()::date + integer '8', TIME '08:00');
+Time: 1.153 ms
+-- Trigger confrim not within the time near the reservation.
+UPDATE reservation
+SET type_of_action = 'confirmed', time_stamp = now()
+WHERE reservation_id = 10012;
+Time: 0.671 ms
+-- Trigger cancel reservation not before the time of the reservation.
+UPDATE reservation
+SET type_of_action = 'canceled', time_stamp = (now()::date + integer '5' + TIME '08:01')
+WHERE reservation_id = 10012;
+Time: 0.470 ms
+-- Trigger Drop not after the time.
+UPDATE reservation
+SET type_of_action = 'dropped', time_stamp = (now()::date + integer '4' + TIME '08:59')
+WHERE reservation_id = 10012;
+Time: 0.439 ms
+-- Trigger not enough lead day.
+INSERT INTO reservation 
+VALUES (10016,11331079, now(),'booked',2,now()::date + integer '7', TIME '10:00');
+Time: 1.619 ms
